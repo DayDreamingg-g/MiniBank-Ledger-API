@@ -1,12 +1,20 @@
+using Microsoft.EntityFrameworkCore;
+using MiniBank.Ledger.Api.Contracts;
+using MiniBank.Ledger.Domain.Entities;
+using MiniBank.Ledger.Infrastructure.Persistence;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+
+var cs = builder.Configuration.GetConnectionString("LedgerDb")
+         ?? throw new InvalidOperationException("Connection string 'LedgerDb' is missing.");
+
+builder.Services.AddDbContext<LedgerDbContext>(options =>
+    options.UseSqlite(cs));
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -14,28 +22,32 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
+// POST /transactions
+app.MapPost("/transactions", async (CreateTransactionRequest req, LedgerDbContext db) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    // Domain validation happens inside the entity constructor (invariants)
+    var tx = new Transaction(
+        amount: req.Amount,
+        currency: req.Currency,
+        date: req.Date,
+        category: req.Category,
+        description: req.Description ?? string.Empty,
+        type: req.Type);
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
+    db.Transactions.Add(tx);
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/transactions/{tx.Id}", new
+    {
+        tx.Id,
+        tx.Amount,
+        tx.Currency,
+        tx.Date,
+        tx.Category,
+        tx.Description,
+        tx.Type
+    });
 })
-.WithName("GetWeatherForecast");
+.WithName("CreateTransaction");
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
