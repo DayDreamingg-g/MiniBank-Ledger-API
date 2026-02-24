@@ -1,10 +1,11 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using MiniBank.Ledger.Api.Contracts;
 using MiniBank.Ledger.Application;
 using MiniBank.Ledger.Application.Accounts.Queries.GetAccounts;
 using MiniBank.Ledger.Application.Common.Interfaces;
-using MiniBank.Ledger.Domain.Entities;
+using MiniBank.Ledger.Application.Reports.Queries.GetSummaryReport;
+using MiniBank.Ledger.Application.Transactions.Commands.CreateTransaction;
+using MiniBank.Ledger.Application.Transactions.Queries.GetTransactions;
 using MiniBank.Ledger.Infrastructure.Persistence;
 using MiniBank.Ledger.Infrastructure.Repositories;
 
@@ -12,11 +13,9 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
 
-// MediatR (register handlers from Application assembly)
 builder.Services.AddMediatR(cfg =>
     cfg.RegisterServicesFromAssembly(typeof(AssemblyMarker).Assembly));
 
-// Repo implementation (quick CQRS integrity check)
 builder.Services.AddScoped<IAccountRepository, InMemoryAccountRepository>();
 
 var cs = builder.Configuration.GetConnectionString("LedgerDb")
@@ -24,6 +23,8 @@ var cs = builder.Configuration.GetConnectionString("LedgerDb")
 
 builder.Services.AddDbContext<LedgerDbContext>(options =>
     options.UseSqlite(cs));
+
+builder.Services.AddScoped<ILedgerDbContext>(sp => sp.GetRequiredService<LedgerDbContext>());
 
 var app = builder.Build();
 
@@ -34,34 +35,31 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// POST /transactions
-app.MapPost("/transactions", async (CreateTransactionRequest req, LedgerDbContext db) =>
+// POST /transactions (CQRS)
+app.MapPost("/transactions", async (CreateTransactionCommand command, IMediator mediator) =>
 {
-    var tx = new Transaction(
-        amount: req.Amount,
-        currency: req.Currency,
-        date: req.Date,
-        category: req.Category,
-        description: req.Description ?? string.Empty,
-        type: req.Type);
-
-    db.Transactions.Add(tx);
-    await db.SaveChangesAsync();
-
-    return Results.Created($"/transactions/{tx.Id}", new
-    {
-        tx.Id,
-        tx.Amount,
-        tx.Currency,
-        tx.Date,
-        tx.Category,
-        tx.Description,
-        tx.Type
-    });
+    var id = await mediator.Send(command);
+    return Results.Created($"/transactions/{id}", new { id });
 })
 .WithName("CreateTransaction");
 
-// GET /accounts (CQRS check)
+// GET /transactions?from=2026-02-01&to=2026-02-28
+app.MapGet("/transactions", async (DateTime? from, DateTime? to, IMediator mediator) =>
+{
+    var result = await mediator.Send(new GetTransactionsQuery(from, to));
+    return Results.Ok(result);
+})
+.WithName("GetTransactions");
+
+// GET /reports/summary?from=2026-02-01&to=2026-02-28
+app.MapGet("/reports/summary", async (DateTime? from, DateTime? to, IMediator mediator) =>
+{
+    var result = await mediator.Send(new GetSummaryReportQuery(from, to));
+    return Results.Ok(result);
+})
+.WithName("GetSummaryReport");
+
+// GET /accounts (CQRS)
 app.MapGet("/accounts", async (IMediator mediator) =>
 {
     var result = await mediator.Send(new GetAccountsQuery());

@@ -1,9 +1,10 @@
 using Microsoft.EntityFrameworkCore;
+using MiniBank.Ledger.Application.Common.Interfaces;
 using MiniBank.Ledger.Domain.Entities;
 
 namespace MiniBank.Ledger.Infrastructure.Persistence;
 
-public sealed class LedgerDbContext : DbContext
+public sealed class LedgerDbContext : DbContext, ILedgerDbContext
 {
     public LedgerDbContext(DbContextOptions<LedgerDbContext> options) : base(options)
     {
